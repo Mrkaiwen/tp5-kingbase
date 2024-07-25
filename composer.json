@@ -1,5 +1,5 @@
 {
-    "name": "wwws3/kingbase",
+    "name": "wwws35/kingbase",
     "description": "个人基础库",
     "authors": [
         {
@@ -17,7 +17,6 @@
     },
     "require": {
         "php": ">=7.3.0",
-        "analog/analog": "^1.0",
-        "topthink/think-orm": "^2.0"
+        "analog/analog": "^1.0"
     }
 }
