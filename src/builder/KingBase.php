@@ -8,504 +8,163 @@
 // +----------------------------------------------------------------------
 // | Author: liu21st <liu21st@gmail.com>
 // +----------------------------------------------------------------------
-declare (strict_types = 1);
 
-namespace Wwws3\Kingbase\builder;
+namespace Wwws3\Kingbase\connector;
 
 use PDO;
-use think\db\Builder;
-use think\db\exception\DbException as Exception;
-use think\db\Query;
-use think\db\Raw;
+use think\db\Connection;
 
 /**
  * KingBase数据库驱动
  */
-class KingBase extends Builder
+class KingBase extends Connection
 {
-    /**
-     * 查询表达式解析
-     * @var array
-     */
-    protected $parser = [
-        'parseCompare'     => ['=', '<>', '>', '>=', '<', '<='],
-        'parseLike'        => ['LIKE', 'NOT LIKE'],
-        'parseBetween'     => ['NOT BETWEEN', 'BETWEEN'],
-        'parseIn'          => ['NOT IN', 'IN'],
-        'parseExp'         => ['EXP'],
-        'parseRegexp'      => ['REGEXP', 'NOT REGEXP'],
-        'parseNull'        => ['NOT NULL', 'NULL'],
-        'parseBetweenTime' => ['BETWEEN TIME', 'NOT BETWEEN TIME'],
-        'parseTime'        => ['< TIME', '> TIME', '<= TIME', '>= TIME'],
-        'parseExists'      => ['NOT EXISTS', 'EXISTS'],
-        'parseColumn'      => ['COLUMN'],
-        'parseFindInSet'   => ['FIND IN SET'],
-    ];
 
     /**
-     * SELECT SQL表达式
-     * @var string
-     */
-    protected $selectSql = 'SELECT%DISTINCT%%EXTRA% %FIELD% FROM %TABLE%%PARTITION%%FORCE%%JOIN%%WHERE%%GROUP%%HAVING%%UNION%%ORDER%%LIMIT% %LOCK%%COMMENT%';
-
-    /**
-     * INSERT SQL表达式
-     * @var string
-     */
-    protected $insertSql = '%INSERT%%EXTRA% INTO %TABLE%%PARTITION% SET %SET% %DUPLICATE%%COMMENT%';
-
-    /**
-     * INSERT ALL SQL表达式
-     * @var string
-     */
-    protected $insertAllSql = '%INSERT%%EXTRA% INTO %TABLE%%PARTITION% (%FIELD%) VALUES %DATA% %DUPLICATE%%COMMENT%';
-
-    /**
-     * UPDATE SQL表达式
-     * @var string
-     */
-    protected $updateSql = 'UPDATE%EXTRA% %TABLE%%PARTITION% %JOIN% SET %SET% %WHERE% %ORDER%%LIMIT% %LOCK%%COMMENT%';
-
-    /**
-     * DELETE SQL表达式
-     * @var string
-     */
-    protected $deleteSql = 'DELETE%EXTRA% FROM %TABLE%%PARTITION%%USING%%JOIN%%WHERE%%ORDER%%LIMIT% %LOCK%%COMMENT%';
-
-    /**
-     * 生成查询SQL
-     * @access public
-     * @param  Query  $query  查询对象
-     * @param  bool   $one    是否仅获取一个记录
+     * 解析pdo连接的dsn信息
+     * @access protected
+     * @param  array $config 连接信息
      * @return string
      */
-    public function select(Query $query, bool $one = false): string
+    protected function parseDsn($config)
     {
-        $options = $query->getOptions();
-
-        return str_replace(
-            ['%TABLE%', '%PARTITION%', '%DISTINCT%', '%EXTRA%', '%FIELD%', '%JOIN%', '%WHERE%', '%GROUP%', '%HAVING%', '%ORDER%', '%LIMIT%', '%UNION%', '%LOCK%', '%COMMENT%', '%FORCE%'],
-            [
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                $this->parseDistinct($query, $options['distinct']),
-                $this->parseExtra($query, $options['extra']),
-                $this->parseField($query, $options['field'] ?? '*'),
-                $this->parseJoin($query, $options['join']),
-                $this->parseWhere($query, $options['where']),
-                $this->parseGroup($query, $options['group']),
-                $this->parseHaving($query, $options['having']),
-                $this->parseOrder($query, $options['order']),
-                $this->parseLimit($query, $one ? '1' : $options['limit']),
-                $this->parseUnion($query, $options['union']),
-                $this->parseLock($query, $options['lock']),
-                $this->parseComment($query, $options['comment']),
-                $this->parseForce($query, $options['force']),
-            ],
-            $this->selectSql
-        );
-    }
-
-    /**
-     * 生成Insert SQL
-     * @access public
-     * @param  Query $query 查询对象
-     * @return string
-     */
-    public function insert(Query $query): string
-    {
-        $options = $query->getOptions();
-
-        // 分析并处理数据
-        $data = $this->parseData($query, $options['data']);
-        if (empty($data)) {
-            return '';
-        }
-
-        $set = [];
-        foreach ($data as $key => $val) {
-            $set[] = $key . ' = ' . $val;
-        }
-
-        return str_replace(
-            ['%INSERT%', '%EXTRA%', '%TABLE%', '%PARTITION%', '%SET%', '%DUPLICATE%', '%COMMENT%'],
-            [
-                !empty($options['replace']) ? 'REPLACE' : 'INSERT',
-                $this->parseExtra($query, $options['extra']),
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                implode(' , ', $set),
-                $this->parseDuplicate($query, $options['duplicate']),
-                $this->parseComment($query, $options['comment']),
-            ],
-            $this->insertSql
-        );
-    }
-
-    /**
-     * 生成insertall SQL
-     * @access public
-     * @param  Query     $query   查询对象
-     * @param  array     $dataSet 数据集
-     * @return string
-     */
-    public function insertAll(Query $query, array $dataSet): string
-    {
-        $options = $query->getOptions();
-
-        // 获取绑定信息
-        $bind = $query->getFieldsBindType();
-
-        // 获取合法的字段
-        if (empty($options['field']) || '*' == $options['field']) {
-            $allowFields = array_keys($bind);
+        if (!empty($config['socket'])) {
+            $dsn = 'kdb:unix_socket=' . $config['socket'];
+        } elseif (!empty($config['hostport'])) {
+            $dsn = 'kdb:host=' . $config['hostname'] . ';port=' . $config['hostport'];
         } else {
-            $allowFields = $options['field'];
+            $dsn = 'kdb:host=' . $config['hostname'];
         }
+        $dsn .= ';dbname=' . $config['database'];
 
-        $fields = [];
-        $values = [];
-
-        foreach ($dataSet as $data) {
-            $data = $this->parseData($query, $data, $allowFields, $bind);
-
-            $values[] = '( ' . implode(',', array_values($data)) . ' )';
-
-            if (!isset($insertFields)) {
-                $insertFields = array_keys($data);
-            }
-        }
-
-        foreach ($insertFields as $field) {
-            $fields[] = $this->parseKey($query, $field);
-        }
-
-        return str_replace(
-            ['%INSERT%', '%EXTRA%', '%TABLE%', '%PARTITION%', '%FIELD%', '%DATA%', '%DUPLICATE%', '%COMMENT%'],
-            [
-                !empty($options['replace']) ? 'REPLACE' : 'INSERT',
-                $this->parseExtra($query, $options['extra']),
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                implode(' , ', $fields),
-                implode(' , ', $values),
-                $this->parseDuplicate($query, $options['duplicate']),
-                $this->parseComment($query, $options['comment']),
-            ],
-            $this->insertAllSql
-        );
+        return $dsn;
     }
 
     /**
-     * 生成insertall SQL
+     * 取得数据表的字段信息
      * @access public
-     * @param  Query    $query   查询对象
-     * @param  array    $keys 键值
-     * @param  array    $values 数据
-     * @return string
+     * @param  string $tableName
+     * @return array
      */
-    public function insertAllByKeys(Query $query, array $keys, array $datas): string
+    public function getFields($tableName)
     {
-        $options = $query->getOptions();
+        list($tableName) = explode(' ', $tableName);
 
-        // 获取绑定信息
-        $bind   = $query->getFieldsBindType();
-        $fields = [];
-        $values = [];
-
-        foreach ($keys as $field) {
-            $fields[] = $this->parseKey($query, $field);
-        }
-
-        foreach ($datas as $data) {
-            foreach ($data as $key => &$val) {
-                if (!$query->isAutoBind()) {
-                    $val = PDO::PARAM_STR == $bind[$keys[$key]] ? '\'' . $val . '\'' : $val;
-                } else {
-                    $val = $this->parseDataBind($query, $keys[$key], $val, $bind);
-                }
+        if (false === strpos($tableName, '`')) {
+            if (strpos($tableName, '.')) {
+                $tableName = str_replace('.', '`.`', $tableName);
             }
-            $values[] = '( ' . implode(',', $data) . ' )';
+            $tableName = '`' . $tableName . '`';
         }
 
-        return str_replace(
-            ['%INSERT%', '%EXTRA%', '%TABLE%', '%PARTITION%', '%FIELD%', '%DATA%', '%DUPLICATE%', '%COMMENT%'],
-            [
-                !empty($options['replace']) ? 'REPLACE' : 'INSERT',
-                $this->parseExtra($query, $options['extra']),
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                implode(' , ', $fields),
-                implode(' , ', $values),
-                $this->parseDuplicate($query, $options['duplicate']),
-                $this->parseComment($query, $options['comment']),
-            ],
-            $this->insertAllSql
-        );
+        $sql = "SELECT column_name as Field, data_type as Type, character_maximum_length, is_nullable as Null
+            FROM information_schema.columns
+            WHERE table_name = '{$tableName}'
+            ORDER BY ordinal_position";
+
+        $pdo    = $this->query($sql, [], false, true);
+        $result = $pdo->fetchAll(PDO::FETCH_ASSOC);
+        $info   = [];
+
+        if ($result) {
+            foreach ($result as $key => $val) {
+                $val                 = array_change_key_case($val);
+                $info[$val['field']] = [
+                    'name'    => $val['field'],
+                    'type'    => $val['type'],
+                    'notnull' => 'NO' == $val['null'],
+//                    'default' => $val['default'],
+//                    'primary' => strtolower($val['key']) == 'pri',
+//                    'autoinc' => strtolower($val['extra']) == 'auto_increment',
+                ];
+            }
+        }
+
+        return $this->fieldCase($info);
     }
 
     /**
-     * 生成update SQL
+     * 取得数据库的表信息
      * @access public
-     * @param  Query     $query  查询对象
-     * @return string
+     * @param  string $dbName
+     * @return array
      */
-    public function update(Query $query): string
+    public function getTables($dbName = '')
     {
-        $options = $query->getOptions();
+        $sql    = !empty($dbName) ? 'SHOW TABLES FROM ' . $dbName : 'SHOW TABLES ';
+        $pdo    = $this->query($sql, [], false, true);
+        $result = $pdo->fetchAll(PDO::FETCH_ASSOC);
+        $info   = [];
 
-        $data = $this->parseData($query, $options['data']);
-
-        if (empty($data)) {
-            return '';
+        foreach ($result as $key => $val) {
+            $info[$key] = current($val);
         }
 
-        $set = [];
-        foreach ($data as $key => $val) {
-            $set[] = (strpos($key, '->') ? strstr($key, '->', true) : $key) . ' = ' . $val;
-        }
+        return $info;
+    }
 
-        return str_replace(
-            ['%TABLE%', '%PARTITION%', '%EXTRA%', '%SET%', '%JOIN%', '%WHERE%', '%ORDER%', '%LIMIT%', '%LOCK%', '%COMMENT%'],
-            [
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                $this->parseExtra($query, $options['extra']),
-                implode(' , ', $set),
-                $this->parseJoin($query, $options['join']),
-                $this->parseWhere($query, $options['where']),
-                $this->parseOrder($query, $options['order']),
-                $this->parseLimit($query, $options['limit']),
-                $this->parseLock($query, $options['lock']),
-                $this->parseComment($query, $options['comment']),
-            ],
-            $this->updateSql
-        );
+    protected function supportSavepoint(): bool
+    {
+        return true;
     }
 
     /**
-     * 生成delete SQL
+     * 启动XA事务
      * @access public
-     * @param  Query  $query  查询对象
-     * @return string
+     * @param  string $xid XA事务id
+     * @return void
      */
-    public function delete(Query $query): string
+    public function startTransXa($xid)
     {
-        $options = $query->getOptions();
-
-        return str_replace(
-            ['%TABLE%', '%PARTITION%', '%EXTRA%', '%USING%', '%JOIN%', '%WHERE%', '%ORDER%', '%LIMIT%', '%LOCK%', '%COMMENT%'],
-            [
-                $this->parseTable($query, $options['table']),
-                $this->parsePartition($query, $options['partition']),
-                $this->parseExtra($query, $options['extra']),
-                !empty($options['using']) ? ' USING ' . $this->parseTable($query, $options['using']) . ' ' : '',
-                $this->parseJoin($query, $options['join']),
-                $this->parseWhere($query, $options['where']),
-                $this->parseOrder($query, $options['order']),
-                $this->parseLimit($query, $options['limit']),
-                $this->parseLock($query, $options['lock']),
-                $this->parseComment($query, $options['comment']),
-            ],
-            $this->deleteSql
-        );
+        $this->initConnect(true);
+        $this->linkID->exec("XA START '$xid'");
     }
 
     /**
-     * 正则查询
-     * @access protected
-     * @param  Query        $query        查询对象
-     * @param  string       $key
-     * @param  string       $exp
-     * @param  mixed        $value
-     * @param  string       $field
-     * @return string
-     */
-    protected function parseRegexp(Query $query, string $key, string $exp, $value, string $field): string
-    {
-        if ($value instanceof Raw) {
-            $value = $this->parseRaw($query, $value);
-        }
-
-        return $key . ' ' . $exp . ' ' . $value;
-    }
-
-    /**
-     * FIND_IN_SET 查询
-     * @access protected
-     * @param  Query        $query        查询对象
-     * @param  string       $key
-     * @param  string       $exp
-     * @param  mixed        $value
-     * @param  string       $field
-     * @return string
-     */
-    protected function parseFindInSet(Query $query, string $key, string $exp, $value, string $field): string
-    {
-        if ($value instanceof Raw) {
-            $value = $this->parseRaw($query, $value);
-        }
-
-        return 'FIND_IN_SET(' . $value . ', ' . $key . ')';
-    }
-
-    /**
-     * 字段和表名处理
+     * 预编译XA事务
      * @access public
-     * @param  Query     $query 查询对象
-     * @param  mixed     $key   字段名
-     * @param  bool      $strict   严格检测
-     * @return string
+     * @param  string $xid XA事务id
+     * @return void
      */
-    public function parseKey(Query $query, $key, bool $strict = false): string
+    public function prepareXa($xid)
     {
-        if (is_int($key)) {
-            return (string) $key;
-        } elseif ($key instanceof Raw) {
-            return $this->parseRaw($query, $key);
-        }
-
-        $key = trim($key);
-
-        if (strpos($key, '->>') && false === strpos($key, '(')) {
-            // JSON字段支持
-            [$field, $name] = explode('->>', $key, 2);
-
-            return $this->parseKey($query, $field, true) . '->>\'$' . (strpos($name, '[') === 0 ? '' : '.') . str_replace('->>', '.', $name) . '\'';
-        } elseif (strpos($key, '->') && false === strpos($key, '(')) {
-            // JSON字段支持
-            [$field, $name] = explode('->', $key, 2);
-            return 'json_extract(' . $this->parseKey($query, $field, true) . ', \'$' . (strpos($name, '[') === 0 ? '' : '.') . str_replace('->', '.', $name) . '\')';
-        } elseif (strpos($key, '.') && !preg_match('/[,\'\"\(\)`\s]/', $key)) {
-            [$table, $key] = explode('.', $key, 2);
-
-            $alias = $query->getOptions('alias');
-
-            if ('__TABLE__' == $table) {
-                $table = $query->getOptions('table');
-                $table = is_array($table) ? array_shift($table) : $table;
-            }
-
-            if (isset($alias[$table])) {
-                $table = $alias[$table];
-            }
-        }
-
-        if ($strict && !preg_match('/^[\w\.\*]+$/', $key)) {
-            throw new Exception('not support data:' . $key);
-        }
-
-        if ('*' != $key && !preg_match('/[,\'\"\*\(\)`.\s]/', $key)) {
-            $key = '`' . $key . '`';
-        }
-
-        if (isset($table)) {
-            if (strpos($table, '.')) {
-                $table = str_replace('.', '`.`', $table);
-            }
-
-            $key = '`' . $table . '`.' . $key;
-        }
-
-        return $key;
+        $this->initConnect(true);
+        $this->linkID->exec("XA END '$xid'");
+        $this->linkID->exec("XA PREPARE '$xid'");
     }
 
     /**
-     * 随机排序
-     * @access protected
-     * @param  Query     $query        查询对象
-     * @return string
+     * 提交XA事务
+     * @access public
+     * @param  string $xid XA事务id
+     * @return void
      */
-    protected function parseRand(Query $query): string
+    public function commitXa($xid)
     {
-        return 'rand()';
+        $this->initConnect(true);
+        $this->linkID->exec("XA COMMIT '$xid'");
     }
 
     /**
-     * Partition 分析
-     * @access protected
-     * @param  Query        $query    查询对象
-     * @param  string|array $partition  分区
-     * @return string
+     * 回滚XA事务
+     * @access public
+     * @param  string $xid XA事务id
+     * @return void
      */
-    protected function parsePartition(Query $query, $partition): string
+    public function rollbackXa($xid)
     {
-        if ('' == $partition) {
-            return '';
-        }
-
-        if (is_string($partition)) {
-            $partition = explode(',', $partition);
-        }
-
-        return ' PARTITION (' . implode(' , ', $partition) . ') ';
+        $this->initConnect(true);
+        $this->linkID->exec("XA ROLLBACK '$xid'");
     }
 
     /**
-     * ON DUPLICATE KEY UPDATE 分析
+     * SQL性能分析
      * @access protected
-     * @param  Query  $query    查询对象
-     * @param  mixed  $duplicate
-     * @return string
+     * @param  string $sql
+     * @return array
      */
-    protected function parseDuplicate(Query $query, $duplicate): string
+    protected function getExplain($sql)
     {
-        if ('' == $duplicate) {
-            return '';
-        }
-
-        if ($duplicate instanceof Raw) {
-            return ' ON DUPLICATE KEY UPDATE ' . $this->parseRaw($query, $duplicate) . ' ';
-        }
-
-        if (is_string($duplicate)) {
-            $duplicate = explode(',', $duplicate);
-        }
-
-        $updates = [];
-        foreach ($duplicate as $key => $val) {
-            if (is_numeric($key)) {
-                $val       = $this->parseKey($query, $val);
-                $updates[] = $val . ' = VALUES(' . $val . ')';
-            } elseif ($val instanceof Raw) {
-                $updates[] = $this->parseKey($query, $key) . " = " . $this->parseRaw($query, $val);
-            } else {
-                $name      = $query->bindValue($val, $query->getConnection()->getFieldBindType($key));
-                $updates[] = $this->parseKey($query, $key) . " = :" . $name;
-            }
-        }
-
-        return ' ON DUPLICATE KEY UPDATE ' . implode(' , ', $updates) . ' ';
-    }
-
-    /**
-     * table分析
-     * @access protected
-     * @param  Query     $query     查询对象
-     * @param  mixed     $tables    表名
-     * @return string
-     */
-    protected function parseTable(Query $query, $tables): string
-    {
-        $item    = [];
-        $options = $query->getOptions();
-
-        foreach ((array) $tables as $key => $table) {
-            if ($table instanceof Raw) {
-                $item[] = $this->parseRaw($query, $table);
-            } elseif (!is_numeric($key)) {
-                $item[] = $this->parseKey($query, $key) . ' ' . $this->parseKey($query, $table);
-            } elseif (isset($options['alias'][$table])) {
-                $item[] = $this->parseKey($query, $table) . ' ' . $this->parseKey($query, $options['alias'][$table]);
-            } else {
-                $prefix = config('database.connections.mysql.database').'.';
-                if(strpos($table,$prefix) === false){
-                    $table = $prefix.$options['table'];
-                }
-                $item[] = $this->parseKey($query, $table);
-            }
-        }
-
-        return implode(',', $item);
+        return [];
     }
 }
