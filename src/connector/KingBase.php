@@ -8,7 +8,6 @@
 // +----------------------------------------------------------------------
 // | Author: liu21st <liu21st@gmail.com>
 // +----------------------------------------------------------------------
-declare (strict_types = 1);
 
 namespace Wwws3\Kingbase\connector;
 
@@ -27,7 +26,7 @@ class KingBase extends Connection
      * @param  array $config 连接信息
      * @return string
      */
-    protected function parseDsn(array $config): string
+    protected function parseDsn($config)
     {
         if (!empty($config['socket'])) {
             $dsn = 'kdb:unix_socket=' . $config['socket'];
@@ -47,29 +46,32 @@ class KingBase extends Connection
      * @param  string $tableName
      * @return array
      */
-    public function getFields(string $tableName): array
+    public function getFields($tableName)
     {
-        [$tableName] = explode(' ', $tableName);
+        list($tableName) = explode(' ', $tableName);
+        $tabs = explode('.', $tableName);
+        $tableName = end($tabs);
 
+        $sql = "SELECT column_name as Field, data_type as Type, character_maximum_length, is_nullable as Null
+            FROM information_schema.columns
+            WHERE table_name = '{$tableName}'
+            ORDER BY ordinal_position";
 
-        $sql = "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '{$tableName}';";
-//        $sql    = 'SHOW FULL COLUMNS FROM ' . $tableName;
-        $pdo    = $this->getPDOStatement($sql);
+        $pdo    = $this->query($sql, [], false, true);
         $result = $pdo->fetchAll(PDO::FETCH_ASSOC);
+
         $info   = [];
 
-        if (!empty($result)) {
+        if ($result) {
             foreach ($result as $key => $val) {
-                $val = array_change_key_case($val);
-
-                $info[$val['column_name']] = [
-                    'name'    => $val['column_name'],
-                    'type'    => $val['data_type'],
-                    'notnull' => 'NO' == $val['is_nullable'],
-                    'default' => $val['column_default'],
+                $val                 = array_change_key_case($val);
+                $info[$val['field']] = [
+                    'name'    => $val['field'],
+                    'type'    => $val['type'],
+                    'notnull' => 'NO' == $val['null'],
+//                    'default' => $val['default'],
 //                    'primary' => strtolower($val['key']) == 'pri',
 //                    'autoinc' => strtolower($val['extra']) == 'auto_increment',
-//                    'comment' => $val['comment'],
                 ];
             }
         }
@@ -83,10 +85,10 @@ class KingBase extends Connection
      * @param  string $dbName
      * @return array
      */
-    public function getTables(string $dbName = ''): array
+    public function getTables($dbName = '')
     {
         $sql    = !empty($dbName) ? 'SHOW TABLES FROM ' . $dbName : 'SHOW TABLES ';
-        $pdo    = $this->getPDOStatement($sql);
+        $pdo    = $this->query($sql, [], false, true);
         $result = $pdo->fetchAll(PDO::FETCH_ASSOC);
         $info   = [];
 
@@ -108,9 +110,13 @@ class KingBase extends Connection
      * @param  string $xid XA事务id
      * @return void
      */
-    public function startTransXa(string $xid): void
+    public function startTransXa($xid)
     {
         $this->initConnect(true);
+        if (!$this->linkID) {
+            return false;
+        }
+
         $this->linkID->exec("XA START '$xid'");
     }
 
@@ -120,7 +126,7 @@ class KingBase extends Connection
      * @param  string $xid XA事务id
      * @return void
      */
-    public function prepareXa(string $xid): void
+    public function prepareXa($xid)
     {
         $this->initConnect(true);
         $this->linkID->exec("XA END '$xid'");
@@ -133,7 +139,7 @@ class KingBase extends Connection
      * @param  string $xid XA事务id
      * @return void
      */
-    public function commitXa(string $xid): void
+    public function commitXa($xid)
     {
         $this->initConnect(true);
         $this->linkID->exec("XA COMMIT '$xid'");
@@ -145,9 +151,20 @@ class KingBase extends Connection
      * @param  string $xid XA事务id
      * @return void
      */
-    public function rollbackXa(string $xid): void
+    public function rollbackXa($xid)
     {
         $this->initConnect(true);
         $this->linkID->exec("XA ROLLBACK '$xid'");
+    }
+
+    /**
+     * SQL性能分析
+     * @access protected
+     * @param  string $sql
+     * @return array
+     */
+    protected function getExplain($sql)
+    {
+        return [];
     }
 }
