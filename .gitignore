@@ -1,0 +1,8 @@
+/vendor/
+./idea
+.git/*
+./composer.lock
+composer.lock
+.idea/*
+/.git/
+/.idea/

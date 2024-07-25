@@ -1,0 +1,23 @@
+{
+    "name": "wwws3/kingbase",
+    "description": "个人基础库",
+    "authors": [
+        {
+            "name": "liuzw",
+            "email": "liuzw@2wb.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Wwws3\\Kingbase\\": "src/"
+        },
+        "files": [
+            "src/functions_include.php"
+        ]
+    },
+    "require": {
+        "php": ">=7.3.0",
+        "analog/analog": "^1.0",
+        "topthink/think-orm": "^2.0"
+    }
+}
