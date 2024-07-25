@@ -13,12 +13,12 @@ declare (strict_types = 1);
 namespace Wwws3\Kingbase\connector;
 
 use PDO;
-use think\db\PDOConnection;
+use think\db\Connection;
 
 /**
  * KingBase数据库驱动
  */
-class KingBase extends PDOConnection
+class KingBase extends Connection
 {
 
     /**
