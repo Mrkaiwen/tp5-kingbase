@@ -142,9 +142,13 @@ class KingBase extends Builder
                 if (isset($options['alias'][$table])) {
                     $item[] = $this->parseKey($query, $table) . ' ' . $this->parseKey($query, $options['alias'][$table]);
                 } else {
-                    $prefix = config('database.database').'.';
-                    if(strpos($table,$prefix) === false){
-                        $table = $prefix.$options['table'];
+                    if (strpos($table, ')')) {
+                        // 子查询
+                    }else{
+                        $prefix = config('database.database') . '.';
+                        if (strpos($table, $prefix) === false) {
+                            $table = $prefix . $options['table'];
+                        }
                     }
                     $item[] = $this->parseKey($query, $table);
                 }
