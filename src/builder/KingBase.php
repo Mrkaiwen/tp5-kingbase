@@ -135,27 +135,33 @@ class KingBase extends Builder
         foreach ((array) $tables as $key => $table) {
             if (!is_numeric($key)) {
                 $key    = $this->connection->parseSqlTable($key);
-                $item[] = $this->parseKey($query, $key) . ' ' . $this->parseKey($query, $table);
+                $item[] = $this->parseKey($query, $this->getTable($key)) . ' ' . $this->parseKey($query, $table);
             } else {
                 $table = $this->connection->parseSqlTable($table);
 
                 if (isset($options['alias'][$table])) {
-                    $item[] = $this->parseKey($query, $table) . ' ' . $this->parseKey($query, $options['alias'][$table]);
+                    $item[] = $this->parseKey($query, $this->getTable($table)) . ' ' . $this->parseKey($query, $options['alias'][$table]);
                 } else {
-                    if (strpos($table, ')')) {
-                        // 子查询
-                    }else{
-                        $prefix = config('database.database') . '.';
-                        if (strpos($table, $prefix) === false) {
-                            $table = $prefix . $options['table'];
-                        }
-                    }
-                    $item[] = $this->parseKey($query, $table);
+                    $item[] = $this->parseKey($query, $this->getTable($table));
                 }
             }
         }
 
         return implode(',', $item);
+    }
+
+    public function getTable($table)
+    {
+        $table_new = $table;
+        if (strpos($table, ')')) {
+            // 子查询
+        } else {
+            $prefix = config('database.database') . '.';
+            if (strpos($table, $prefix) === false) {
+                $table_new = $prefix . $table;
+            }
+        }
+        return $table_new;
     }
 
 
@@ -441,5 +447,54 @@ class KingBase extends Builder
                 $this->parseComment($query, $options['comment']),
             ],
             $this->deleteSql);
+    }
+
+    /**
+     * 日期时间条件解析
+     * @access protected
+     * @param  Query     $query        查询对象
+     * @param  string    $value
+     * @param  string    $key
+     * @param  integer   $bindType
+     * @return string
+     */
+    protected function parseDateTime(Query $query, $value, $key, $bindType = null)
+    {
+        $options = $query->getOptions();
+
+        // 获取时间字段类型
+        if (strpos($key, '.')) {
+            list($table, $key) = explode('.', $key);
+
+            if (isset($options['alias']) && $pos = array_search($table, $options['alias'])) {
+                $table = $pos;
+            }
+        } else {
+            $table = $options['table'];
+        }
+
+        $type = $this->connection->getTableInfo($table, 'type');
+
+        if (isset($type[$key])) {
+            $info = $type[$key];
+        }
+
+        if (isset($info)) {
+            if (is_string($value)) {
+//                $value = strtotime($value) ?: $value;
+            }
+
+            if (preg_match('/(datetime|timestamp)/is', $info)) {
+                // 日期及时间戳类型
+                $value = date('Y-m-d H:i:s', $value);
+            } elseif (preg_match('/(date)/is', $info)) {
+                // 日期及时间戳类型
+                $value = date('Y-m-d', $value);
+            }
+        }
+
+        $name = $query->bind($value, $bindType);
+
+        return ':' . $name;
     }
 }
